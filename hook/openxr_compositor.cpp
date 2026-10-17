@@ -23,6 +23,19 @@
 #include <vulkan/vulkan.h>
 
 /* ---------------------------------------------------------------------------
+ * Build configuration
+ * -------------------------------------------------------------------------- */
+
+/* Set to 1 only when building against an OpenXR SDK that ships the
+ * XR_KHR_vulkan_swapchain extension (XrVulkanSurfaceCreateInfoKHR,
+ * xrCreateVulkanSurfaceKHR, ...). The system OpenXR 1.1.60 header and
+ * libopenxr_loader.so do not provide these symbols, so this is off by
+ * default — see issue #4. */
+#ifndef VR_HAVE_VULKAN_SWAPCHAIN
+#define VR_HAVE_VULKAN_SWAPCHAIN 0
+#endif
+
+/* ---------------------------------------------------------------------------
  * Forward declarations of helper functions (needed before use)
  * -------------------------------------------------------------------------- */
 
@@ -152,7 +165,9 @@ void vrh_destroy_compositor(vrh_compositor_handle_t comp) {
     }
 
     if (state->g_xr_surface != VK_NULL_HANDLE) {
+#if VR_HAVE_VULKAN_SWAPCHAIN
         xrDestroySurfaceKHR(state->g_xr_instance, state->g_xr_surface);
+#endif
     }
 
     if (state->g_vulkan_instance != VK_NULL_HANDLE) {
@@ -397,6 +412,7 @@ static bool create_xr_session(void) {
 static bool create_swapchains(void) {
     if (!g_composer_state.g_xr_session) return false;
 
+#if VR_HAVE_VULKAN_SWAPCHAIN
     void* loader = dlopen("libopenxr_loader.so", RTLD_NOW);
     if (!loader) {
         fprintf(stderr, "[OpenXRCompositor] Error: Could not load libopenxr_loader.so\n");
@@ -430,6 +446,13 @@ static bool create_swapchains(void) {
     }
 
     printf("[OpenXRCompositor] VR surface created successfully.\n");
+#else
+    /* XR_KHR_vulkan_swapchain is not available in this SDK — skip Vulkan
+     * surface creation. Swap chains are still allocated below so the
+     * frame-loop API (begin/end frame) remains a safe no-op until real
+     * runtime negotiation is wired up (see issue #4). */
+    XrResult result = XR_SUCCESS;
+#endif
 
     g_composer_state.g_swapchains = new XrSwapchain[VRHOOK_MAX_VR_DISPLAYS];
     g_composer_state.g_num_swapchains = 0;

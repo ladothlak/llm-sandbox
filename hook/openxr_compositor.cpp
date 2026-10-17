@@ -475,9 +475,9 @@ static bool create_swapchains(void) {
         swapchain_info.imageCount        = VRHOOK_SWAPCHAIN_IMAGE_COUNT;
 
         g_composer_state.g_swapchains[eye] = nullptr;
-        result = xr_create_swapchain(g_composer_state.g_xr_session, 
-                                     &swapchain_info, 
-                                     &g_composer_state.g_swapchains[eye]);
+        result = xrCreateSwapchain(g_composer_state.g_xr_session,
+                                   &swapchain_info,
+                                   &g_composer_state.g_swapchains[eye]);
 
         if (result != XR_SUCCESS) {
             fprintf(stderr, "[OpenXRCompositor] Error: xrCreateSwapchain(eye=%u) failed with %ld\n", 
@@ -513,8 +513,10 @@ vrh_compositor_handle_t vrh_begin_frame(vrh_compositor_handle_t comp) {
 
     state->g_frame_counter++;
 
+    XrFrameWaitInfo frame_wait_info = {};
+    frame_wait_info.type = XR_TYPE_FRAME_WAIT_INFO;
     XrFrameState frame_state = {};
-    XrResult result = xr_wait_frame(state->g_xr_session, &frame_state);
+    XrResult result = xrWaitFrame(state->g_xr_session, &frame_wait_info, &frame_state);
 
     if (result != XR_SUCCESS && result != XR_SESSION_NOT_READY) {
         fprintf(stderr, "[OpenXRCompositor] Warning: xrWaitFrame returned %ld\n", 
@@ -533,9 +535,9 @@ vrh_compositor_handle_t vrh_begin_frame(vrh_compositor_handle_t comp) {
         XrSwapchainImageAcquireInfo acquire_info = {};
         acquire_info.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
 
-        void* image = nullptr;
-        result = xr_acquire_swapchain_image(state->g_swapchains[eye], 
-                                             0, &image);
+        uint32_t image_index = 0;
+        result = xrAcquireSwapchainImage(state->g_swapchains[eye],
+                                         &acquire_info, &image_index);
 
         if (result == XR_SUCCESS) {
             printf("[OpenXRCompositor] Acquired swap chain image %u\n", eye);
@@ -558,8 +560,8 @@ void vrh_end_frame(vrh_compositor_handle_t comp) {
         XrSwapchainImageReleaseInfo release_info = {};
         release_info.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
 
-        XrResult result = xr_release_swapchain_image(state->g_swapchains[eye], 
-                                                      nullptr, 0);
+        XrResult result = xrReleaseSwapchainImage(state->g_swapchains[eye],
+                                                  &release_info);
 
         if (result != XR_SUCCESS) {
             fprintf(stderr, "[OpenXRCompositor] Warning: xrReleaseSwapchainImage(%u) = %ld\n",

@@ -40,7 +40,6 @@
  * -------------------------------------------------------------------------- */
 
 static bool create_vulkan_instance(void);
-static bool get_vulkan_physical_device(void);
 static bool create_xr_instance(void);
 static bool create_xr_session(void);
 static bool create_swapchains(void);
@@ -144,12 +143,12 @@ void vrh_destroy_compositor(vrh_compositor_handle_t comp) {
     printf("[OpenXRCompositor] Destroying compositor...\n");
 
     for (uint32_t i = 0; i < VRHOOK_MAX_VR_DISPLAYS && state->g_swapchains[i]; i++) {
-        xrDestroySwapchain(state->g_xr_session, state->g_swapchains[i]);
+        xrDestroySwapchain(state->g_swapchains[i]);
         state->g_swapchains[i] = nullptr;
     }
 
     if (state->g_xr_refspace != nullptr) {
-        xrDestroySpace(state->g_xr_session, state->g_xr_refspace);
+        xrDestroySpace(state->g_xr_refspace);
     }
 
     if (state->g_xr_session != nullptr) {
@@ -224,46 +223,6 @@ static bool create_vulkan_instance(void) {
     }
 
     printf("[OpenXRCompositor] Vulkan instance created.\n");
-    dlclose(vulkan_lib);
-    return true;
-}
-
-/* ---------------------------------------------------------------------------
- * Helper: Get Physical Device
- * -------------------------------------------------------------------------- */
-
-static bool get_vulkan_physical_device(void) {
-    if (!g_composer_state.g_vulkan_instance) return false;
-
-    void* vulkan_lib = dlopen("libvulkan.so.1", RTLD_NOW);
-    if (!vulkan_lib) {
-        fprintf(stderr, "[OpenXRCompositor] Warning: Could not load libvulkan.so.1\n");
-        return false;
-    }
-
-    PFN_vkEnumeratePhysicalDevices vk_enumerate = (PFN_vkEnumeratePhysicalDevices)dlsym(vulkan_lib, "vkEnumeratePhysicalDevices");
-    if (!vk_enumerate) {
-        fprintf(stderr, "[OpenXRCompositor] Warning: Could not find vkEnumeratePhysicalDevices\n");
-        dlclose(vulkan_lib);
-        return false;
-    }
-
-    uint32_t device_count = 0;
-    vk_enumerate(g_composer_state.g_vulkan_instance, nullptr, &device_count, nullptr);
-
-    if (device_count == 0) {
-        fprintf(stderr, "[OpenXRCompositor] Error: No physical devices found\n");
-        dlclose(vulkan_lib);
-        return false;
-    }
-
-    VkPhysicalDevice* device = new VkPhysicalDevice[device_count];
-    vk_enumerate(g_composer_state.g_vulkan_instance, &device_count, device);
-
-    g_composer_state.g_vulkan_device = device[0];
-    printf("[OpenXRCompositor] Physical device: %d\n", (int)(uint32_t)g_composer_state.g_vulkan_device);
-
-    delete[] device;
     dlclose(vulkan_lib);
     return true;
 }
@@ -386,7 +345,7 @@ static bool create_xr_session(void) {
     g_composer_state.g_xr_refspace = nullptr;
     XrReferenceSpaceCreateInfo xr_refspace_info = {};
     xr_refspace_info.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
-    xr_refspace_info.spaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    xr_refspace_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 
     if (xr_create_refspace) {
         result = xr_create_refspace(g_composer_state.g_xr_session, 
@@ -465,11 +424,6 @@ static bool create_swapchains(void) {
         swapchain_info.faceCount     = 1;
         swapchain_info.arraySize     = 1;
         swapchain_info.mipCount      = 1;
-        swapchain_info.imageFormat    = VK_FORMAT_R8G8B8A8_UNORM;
-        swapchain_info.imageUsageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | 
-                                         XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
-        swapchain_info.imageAspectMask   = VK_IMAGE_ASPECT_COLOR_BIT;
-        swapchain_info.imageCount        = VRHOOK_SWAPCHAIN_IMAGE_COUNT;
 
         g_composer_state.g_swapchains[eye] = nullptr;
         result = xrCreateSwapchain(g_composer_state.g_xr_session,
@@ -482,7 +436,7 @@ static bool create_swapchains(void) {
 
             for (uint32_t i = 0; i < eye; i++) {
                 if (g_composer_state.g_swapchains[i]) {
-                    xrDestroySwapchain(g_composer_state.g_xr_session, g_composer_state.g_swapchains[i]);
+                    xrDestroySwapchain(g_composer_state.g_swapchains[i]);
                     g_composer_state.g_swapchains[i] = nullptr;
                 }
             }

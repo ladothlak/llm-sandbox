@@ -1,0 +1,10 @@
+# Build artifacts
+bin/
+obj/
+build/
+*.o
+*.so
+*.dll
+*.pdb
+*.exe
+*.cache

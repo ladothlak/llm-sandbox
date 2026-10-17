@@ -83,21 +83,19 @@ static const char* get_wine_dll_path(void) {
         "/usr/lib/x86_64-linux-gnu/wine64"
     };
 
+    /* Single static buffer for every branch — the caller does not own it. */
+    static char path_buf[512];
+
     for (size_t i = 0; i < sizeof(fallback_paths)/sizeof(fallback_paths[0]); i++) {
         if (access(fallback_paths[i], R_OK) == 0) {
-            std::string path = fallback_paths[i];
-            path += "/kernel32.so";
-            return path.c_str();   /* .c_str() gives us a const char* */
+            snprintf(path_buf, sizeof(path_buf), "%s/kernel32.so", fallback_paths[i]);
+            return path_buf;
         }
     }
 
     /* Default to game's drive_c */
-    static char default_path[512];
-    snprintf(default_path, sizeof(default_path), "%s/windows/system32/kernel32.dll", drive_c);
-    
-    std::string path = drive_c;
-    path += "/windows/system32/kernel32.dll";
-    return path.c_str();   /* .c_str() gives us a const char* */
+    snprintf(path_buf, sizeof(path_buf), "%s/windows/system32/kernel32.dll", drive_c);
+    return path_buf;
 }
 
 /* ---------------------------------------------------------------------------

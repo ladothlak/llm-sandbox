@@ -1,17 +1,18 @@
 #!/bin/bash
 #
 # Palworld VR Injector Launcher
-# Launches the game with our stub library preloaded via LD_PRELOAD.
+# Launches the game with the injector library preloaded via LD_PRELOAD.
 #
 
 set -euo pipefail
 
-STUB_LIB="/home/joshc/.openclaw/workspace/coordinator/palworld-vr-injector/libpalworldvrstub.so"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INJECTOR_LIB="${SCRIPT_DIR}/libpalworldvr.so"
 GAME_EXE="/home/joshc/.local/share/Steam/steamapps/common/Palworld/Pal/Binaries/Win64/Palworld-Win64-Shipping.exe"
 
-# Fallback: try wine, proton, or protontricks if wine64 isn't installed
+# Fallback: try wine64, wine, proton, or protontricks if none is installed
 WINE_CMD=""
-for cmd in wine proton protontricks; do
+for cmd in wine64 wine proton protontricks; do
     if command -v "$cmd" &>/dev/null; then
         WINE_CMD="$cmd"
         break
@@ -23,18 +24,24 @@ if [ -z "$WINE_CMD" ]; then
     exit 1
 fi
 
-# Verify stub library exists
-if [ ! -f "$STUB_LIB" ]; then
-    echo "[ERROR] Stub library not found: $STUB_LIB" >&2
+# Verify injector library exists (built by 'make all' in this directory)
+if [ ! -f "$INJECTOR_LIB" ]; then
+    echo "[ERROR] Injector library not found: $INJECTOR_LIB" >&2
+    echo "        Build it first: cd \"$SCRIPT_DIR\" && make all" >&2
     exit 1
 fi
 
 echo "=== Palworld VR Injector ==="
-echo "Stub:   $STUB_LIB"
+echo "Lib:    $INJECTOR_LIB"
 echo "Game:   $GAME_EXE"
 echo "Wine:   $WINE_CMD"
 echo ""
 
-# Launch with stub preloaded — initialize LD_PRELOAD to avoid unbound variable error
-export LD_PRELOAD="${LD_PRELOAD:-}"
+# Preload the injector library — append to any existing LD_PRELOAD value.
+if [ -n "${LD_PRELOAD:-}" ]; then
+    export LD_PRELOAD="${LD_PRELOAD}:${INJECTOR_LIB}"
+else
+    export LD_PRELOAD="$INJECTOR_LIB"
+fi
+
 exec "$WINE_CMD" "$GAME_EXE" "$@"

@@ -518,7 +518,7 @@ vrh_compositor_handle_t vrh_begin_frame(vrh_compositor_handle_t comp) {
     XrFrameState frame_state = {};
     XrResult result = xrWaitFrame(state->g_xr_session, &frame_wait_info, &frame_state);
 
-    if (result != XR_SUCCESS && result != XR_SESSION_NOT_READY) {
+    if (result != XR_SUCCESS && result != XR_ERROR_SESSION_NOT_READY) {
         fprintf(stderr, "[OpenXRCompositor] Warning: xrWaitFrame returned %ld\n", 
                 (long)result);
     }
@@ -541,7 +541,9 @@ vrh_compositor_handle_t vrh_begin_frame(vrh_compositor_handle_t comp) {
 
         if (result == XR_SUCCESS) {
             printf("[OpenXRCompositor] Acquired swap chain image %u\n", eye);
-        } else if (result != XR_OPERATION_NOT_PROPOSED) {
+        } else {
+            /* No spec-defined error code means "image not available" for
+             * acquire — warn on any failure. */
             fprintf(stderr, "[OpenXRCompositor] Warning: xrAcquireSwapchainImage(%u) = %ld\n",
                     eye, (long)result);
         }

@@ -214,8 +214,10 @@ static bool create_vulkan_instance(void) {
     create_info.enabledExtensionCount = 2;
     create_info.ppEnabledExtensionNames = extensions;
 
-    g_composer_state.g_vulkan_instance = vk_create_instance(&create_info, nullptr);
-    if (!g_composer_state.g_vulkan_instance) {
+    g_composer_state.g_vulkan_instance = VK_NULL_HANDLE;
+    VkResult vk_result = vk_create_instance(&create_info, nullptr,
+                                            &g_composer_state.g_vulkan_instance);
+    if (vk_result != VK_SUCCESS || !g_composer_state.g_vulkan_instance) {
         fprintf(stderr, "[OpenXRCompositor] Error: vkCreateInstance failed\n");
         dlclose(vulkan_lib);
         return false;
@@ -277,15 +279,10 @@ static bool create_xr_instance(void) {
         return false;
     }
 
-    PFN_xrGetInstanceProcAddr xr_get_proc_addr = (PFN_xrGetInstanceProcAddr)dlsym(loader, "xrGetInstanceProcAddr");
-    if (!xr_get_proc_addr) {
-        fprintf(stderr, "[OpenXRCompositor] Error: Could not find xrGetInstanceProcAddr\n");
-        dlclose(loader);
-        return false;
-    }
-
-    g_composer_state.g_xr_instance = (XrInstance)xr_get_proc_addr(nullptr, "xrGetInstanceProcAddr");
-
+    /* The loader exports entry points directly and is linked via
+     * -lopenxr_loader, so resolve the instance-creation call by name.
+     * (The old PFN->XrInstance cast was both a type error and an arity
+     * bug — see issue #3.) */
     PFN_xrCreateInstance xr_create_instance = (PFN_xrCreateInstance)dlsym(loader, "xrCreateInstance");
     if (!xr_create_instance) {
         fprintf(stderr, "[OpenXRCompositor] Error: Could not find XRCreateInstance\n");
@@ -372,8 +369,8 @@ static bool create_xr_session(void) {
     xr_session_info.type = XR_TYPE_SESSION_CREATE_INFO;
     xr_session_info.systemId = 0;
 
-    result = xr_create_session(g_composer_state.g_xr_instance, 
-                               &xr_session_info, &g_composer_state.g_xr_session);
+    XrResult result = xr_create_session(g_composer_state.g_xr_instance, 
+                                        &xr_session_info, &g_composer_state.g_xr_session);
 
     dlclose(loader);
 

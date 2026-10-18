@@ -58,6 +58,7 @@ struct vrh_compositor_state_t {
     
     /* OpenXR handles — raw pointers for opaque types */
     XrInstance g_xr_instance = nullptr;
+    XrSystemId g_system_id = XR_NULL_SYSTEM_ID;
     XrSession g_xr_session = nullptr;
     XrSpace g_xr_refspace = nullptr;
     VkSurfaceKHR g_xr_surface = VK_NULL_HANDLE;
@@ -208,10 +209,33 @@ static bool create_vulkan_instance(void) {
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create_info.pApplicationInfo = &app_info;
 
-    const char* extensions[] = { "VK_KHR_portability_enumeration",
-                                  "VK_KHR_xr_surface" };
-    create_info.enabledExtensionCount = 2;
-    create_info.ppEnabledExtensionNames = extensions;
+    /* Request only Vulkan instance extensions that actually exist. The old
+     * code listed "VK_KHR_xr_surface", which is not a real extension (the
+     * XR surface API lives in VK_KHR_xr as vkCreateXrSurfaceKHR), so
+     * vkCreateInstance failed with VK_ERROR_EXTENSION_NOT_PRESENT (-7).
+     * Query at runtime and enable whatever the ICD offers. */
+    const char* wanted[] = { "VK_KHR_portability_enumeration",
+                             "VK_KHR_xr" };
+    uint32_t avail_count = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &avail_count, nullptr);
+    VkExtensionProperties* avail = (avail_count > 0)
+        ? new VkExtensionProperties[avail_count] : nullptr;
+    if (avail_count > 0) {
+        vkEnumerateInstanceExtensionProperties(nullptr, &avail_count, avail);
+    }
+    const char* extensions[8] = {};
+    uint32_t enabled = 0;
+    for (uint32_t w = 0; w < 2 && enabled < 8; w++) {
+        for (uint32_t a = 0; a < avail_count; a++) {
+            if (strcmp(avail[a].extensionName, wanted[w]) == 0) {
+                extensions[enabled++] = wanted[w];
+                break;
+            }
+        }
+    }
+    delete[] avail;
+    create_info.enabledExtensionCount = enabled;
+    create_info.ppEnabledExtensionNames = (enabled > 0) ? extensions : nullptr;
 
     g_composer_state.g_vulkan_instance = VK_NULL_HANDLE;
     VkResult vk_result = vk_create_instance(&create_info, nullptr,
@@ -275,10 +299,13 @@ static bool create_xr_instance(void) {
     XrInstanceCreateInfo xr_create_info = {};
     xr_create_info.type = XR_TYPE_INSTANCE_CREATE_INFO;
     xr_create_info.applicationInfo = app_info;
-    xr_create_info.enabledExtensionCount = 2;
-
-    const char* extensions[] = { "VK_KHR_portability_enumeration",
-                                  "VK_KHR_xr_surface" };
+    /* Request the OpenXR extension that enables Vulkan surface creation.
+     * The old code passed *Vulkan* extension names (VK_KHR_*) here, which
+     * are not valid OpenXR extension identifiers — xrCreateInstance rejects
+     * them with XR_ERROR_EXTENSION_NOT_PRESENT. SteamVR's runtime advertises
+     * XR_KHR_vulkan_enable (confirmed via a live loader probe). */
+    const char* extensions[] = { "XR_KHR_vulkan_enable" };
+    xr_create_info.enabledExtensionCount = 1;
     xr_create_info.enabledExtensionNames = extensions;
 
     g_composer_state.g_xr_instance = nullptr;
@@ -322,11 +349,53 @@ static bool create_xr_session(void) {
         fprintf(stderr, "[OpenXRCompositor] Warning: Could not find xrCreateReferenceSpace\n");
     }
 
-    /* Create session with a dummy system ID — the runtime will handle validation */
+    /* Enumerate a real head-tracked display system. The old code hardcoded
+     * systemId=0, which is not a valid OpenXR system handle — SteamVR (and any
+     * conformant runtime) rejects it. When no headset is attached the runtime
+     * returns XR_ERROR_FORM_FACTOR_UNAVAILABLE; we then bail out cleanly so the
+     * injector stays in pass-through mode rather than presenting to nothing. */
+    PFN_xrGetSystem xr_get_system = (PFN_xrGetSystem)dlsym(loader, "xrGetSystem");
+    XrSystemGetInfo sys_info = {};
+    sys_info.type = XR_TYPE_SYSTEM_GET_INFO;
+    sys_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+
+    XrSystemId system_id = XR_NULL_SYSTEM_ID;
+    if (xr_get_system) {
+        XrResult sys_result = xr_get_system(g_composer_state.g_xr_instance, &sys_info, &system_id);
+        if (sys_result == XR_SUCCESS && system_id != XR_NULL_SYSTEM_ID) {
+            PFN_xrGetSystemProperties xr_get_props =
+                (PFN_xrGetSystemProperties)dlsym(loader, "xrGetSystemProperties");
+            XrSystemProperties props = {};
+            props.type = XR_TYPE_SYSTEM_PROPERTIES;
+            if (xr_get_props &&
+                xr_get_props(g_composer_state.g_xr_instance, system_id, &props) == XR_SUCCESS) {
+                printf("[OpenXRCompositor] Head-tracked display: %s (vendor 0x%x)\n",
+                       props.systemName, (unsigned)props.vendorId);
+            } else {
+                printf("[OpenXRCompositor] Head-tracked display found.\n");
+            }
+        } else if (sys_result == XR_ERROR_FORM_FACTOR_UNAVAILABLE) {
+            fprintf(stderr,
+                "[OpenXRCompositor] No head-tracked display available "
+                "(XR_ERROR_FORM_FACTOR_UNAVAILABLE). Staying in pass-through mode.\n");
+            dlclose(loader);
+            return false;
+        } else {
+            fprintf(stderr, "[OpenXRCompositor] xrGetSystem failed with %ld. "
+                            "Staying in pass-through mode.\n", (long)sys_result);
+            dlclose(loader);
+            return false;
+        }
+    } else {
+        fprintf(stderr, "[OpenXRCompositor] Warning: Could not find xrGetSystem\n");
+    }
+    g_composer_state.g_system_id = system_id;
+
+    /* Create the session against the enumerated (real) system id. */
     g_composer_state.g_xr_session = nullptr;
     XrSessionCreateInfo xr_session_info = {};
     xr_session_info.type = XR_TYPE_SESSION_CREATE_INFO;
-    xr_session_info.systemId = 0;
+    xr_session_info.systemId = system_id;
 
     XrResult result = xr_create_session(g_composer_state.g_xr_instance, 
                                         &xr_session_info, &g_composer_state.g_xr_session);
